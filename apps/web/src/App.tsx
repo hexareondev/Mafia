@@ -20,6 +20,7 @@ export default function App() {
   const [code, setCode] = useState("");
   const [room, setRoom] = useState<RoomSnapshot | null>(null);
   const [role, setRole] = useState<Role | null>(null);
+  const [investigationResult, setInvestigationResult] = useState<{ targetId: string; targetName: string; isMafia: boolean } | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -31,6 +32,7 @@ export default function App() {
       if (nextRoom.status === "lobby") setRole(null);
     });
     connection.on("game:role", setRole);
+    connection.on("game:investigation-result", setInvestigationResult);
     setSocket(connection);
     return () => { connection.disconnect(); };
   }, []);
@@ -39,7 +41,7 @@ export default function App() {
     if (!socket) return;
     setError("");
     socket.emit("room:create", { playerName: name }, (result) => {
-      if (result.ok) { setRoom(result.room); setRole(null); }
+      if (result.ok) { setRoom(result.room); setRole(null); setInvestigationResult(null); }
       else setError(result.error);
     });
   };
@@ -73,6 +75,15 @@ export default function App() {
     if (!socket) return;
     setError("");
     socket.emit("game:start", (result) => {
+      if (result.ok) setRoom(result.room);
+      else setError(result.error);
+    });
+  };
+
+  const performNightAction = (targetId: string) => {
+    if (!socket) return;
+    setError("");
+    socket.emit("game:night-action", { targetId }, (result) => {
       if (result.ok) setRoom(result.room);
       else setError(result.error);
     });
@@ -120,7 +131,17 @@ export default function App() {
       ) : (
         <section className="room-view">
           <button className="back-button" onClick={leaveRoom}><ArrowLeft size={16} /> Покинуть комнату</button>
-          {room.status === "playing" && role ? (
+          {room.status === "finished" ? (
+            <div className="role-reveal">
+              <div className="eyebrow"><span /> ПАРТИЯ ЗАВЕРШЕНА</div>
+              <h1>Победа<br /><em>{room.winner === "town" ? "города." : "мафии."}</em></h1>
+              <div className="role-card">
+                <Shield size={28} />
+                <p>{room.winner === "town" ? "Все мафиози выбыли. Город победил!" : "Мафия сравнялась числом с мирными жителями или превзошла их."}</p>
+              </div>
+              <p className="waiting-note">Чтобы сыграть снова, создайте новую комнату.</p>
+            </div>
+          ) : room.status === "playing" && role ? (
             <div className="role-reveal">
               <div className="eyebrow"><span /> ВАША ТАЙНАЯ РОЛЬ</div>
               <h1>Вы —<br /><em>{ROLE_INFO[role].title}.</em></h1>
@@ -129,7 +150,39 @@ export default function App() {
                 <p>{ROLE_INFO[role].description}</p>
                 <small>Не показывайте эту карточку другим игрокам.</small>
               </div>
-              <p className="waiting-note">Роли розданы. Следующий этап — ночные действия и игровой цикл.</p>
+              {room.phase === "night" ? (
+                <section className="game-panel">
+                  <div className="phase-label"><Moon size={16} /> НОЧЬ {room.dayNumber}</div>
+                  <h2>Город засыпает</h2>
+                  {room.players.find((player) => player.id === socket?.id)?.alive ? (
+                    role === "citizen" ? (
+                      <p className="waiting-note">У мирного жителя нет ночного действия. Ожидайте рассвета.</p>
+                    ) : (
+                      <>
+                        <p className="game-hint">{role === "mafia" ? "Выберите игрока для устранения. Если мафиози несколько, решение будет принято по большинству голосов." : role === "doctor" ? "Выберите игрока, которого хотите защитить этой ночью. Можно спасти и себя." : "Выберите игрока для тайной проверки. Результат увидите только вы."}</p>
+                        <div className="target-list">
+                          {room.players.filter((player) => player.alive && (role !== "detective" || player.id !== socket?.id) && (role !== "mafia" || player.id !== socket?.id && room.players.find((p) => p.id === player.id))).map((player) => (
+                            <button className="target-button" key={player.id} onClick={() => performNightAction(player.id)}>{player.name}<span>Выбрать</span></button>
+                          ))}
+                        </div>
+                      </>
+                    )
+                  ) : <p className="waiting-note">Вы выбыли и больше не можете совершать действия.</p>}
+                  {investigationResult && <div className="investigation-result"><strong>Результат проверки</strong><span>{investigationResult.targetName}: {investigationResult.isMafia ? "мафия" : "не мафия"}</span></div>}
+                  <p className="waiting-note">Ночь закончится, когда все живые мафия, доктор и комиссар выполнят свои действия.</p>
+                </section>
+              ) : (
+                <section className="game-panel">
+                  <div className="phase-label"><Users size={16} /> ДЕНЬ {room.dayNumber}</div>
+                  <h2>Город просыпается</h2>
+                  <p className="day-result">{room.lastNightMessage ?? "Наступил новый день."}</p>
+                  <p className="waiting-note">Дневное обсуждение и голосование будут добавлены следующим этапом. Пока партия остановлена на дневной фазе.</p>
+                </section>
+              )}
+              <div className="game-roster">
+                <strong>Игроки</strong>
+                {room.players.map((player) => <div className={player.alive ? "game-player" : "game-player is-dead"} key={player.id}><span>{player.name}</span><small>{player.alive ? "В игре" : "Выбыл"}</small></div>)}
+              </div>
             </div>
           ) : room.status === "playing" ? (
             <div className="role-reveal">
