@@ -385,7 +385,7 @@ io.on("connection", (socket) => {
   socket.on("chat:send", ({ text: rawText }, callback) => {
     const roomCode = socketRooms.get(socket.id);
     const room = roomCode ? rooms.get(roomCode) : undefined;
-    if (!room || room.status !== "playing") return callback({ ok: false, error: "Чат доступен только во время игры." });
+    if (!room || room.status !== "playing" || room.phase !== "day") return callback({ ok: false, error: "Чат доступен только во время дневного обсуждения." });
     const player = room.players.find((item) => item.socketId === socket.id);
     if (!player || !player.alive) return callback({ ok: false, error: "Выбывшие игроки не могут писать в чат." });
     const messageText = rawText.trim().slice(0, 240);
