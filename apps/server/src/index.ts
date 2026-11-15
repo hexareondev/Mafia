@@ -7,6 +7,7 @@ import {
   MIN_PLAYERS_TO_START,
   ROOM_CODE_LENGTH,
   type ClientToServerEvents,
+  type GameWinner,
   type InterServerEvents,
   type PlayerSummary,
   type Role,
@@ -34,9 +35,17 @@ type Room = {
   code: string;
   players: RoomPlayer[];
   createdAt: number;
-  status: "lobby" | "playing";
+  status: "lobby" | "playing" | "finished";
+  phase: "night" | "day" | null;
+  dayNumber: number;
+  winner: GameWinner | null;
+  lastNightMessage: string | null;
   roles: Map<string, Role>;
+  mafiaVotes: Map<string, string>;
+  doctorTarget: string | null;
+  detectiveActed: boolean;
 };
+
 const rooms = new Map<string, Room>();
 const socketRooms = new Map<string, string>();
 
@@ -50,7 +59,7 @@ function makeRoomCode(): string {
 }
 
 function publicPlayers(room: Room): PlayerSummary[] {
-  return room.players.map(({ id, name, isHost, ready }) => ({ id, name, isHost, ready }));
+  return room.players.map(({ id, name, isHost, ready, alive }) => ({ id, name, isHost, ready, alive }));
 }
 
 function snapshot(room: Room): RoomSnapshot {
@@ -59,32 +68,15 @@ function snapshot(room: Room): RoomSnapshot {
     players: publicPlayers(room),
     hostId: room.players.find((player) => player.isHost)?.id ?? null,
     status: room.status,
+    phase: room.phase,
+    dayNumber: room.dayNumber,
+    winner: room.winner,
+    lastNightMessage: room.lastNightMessage,
   };
 }
 
 function emitRoom(room: Room): void {
   io.to(room.code).emit("room:updated", snapshot(room));
-}
-
-function leaveCurrentRoom(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>): void {
-  const roomCode = socketRooms.get(socket.id);
-  if (!roomCode) return;
-  const room = rooms.get(roomCode);
-  socketRooms.delete(socket.id);
-  socket.leave(roomCode);
-  if (!room) return;
-
-  room.players = room.players.filter((player) => player.socketId !== socket.id);
-  room.roles.delete(socket.id);
-  if (room.players.length === 0) {
-    rooms.delete(roomCode);
-    return;
-  }
-  if (!room.players.some((player) => player.isHost)) {
-    room.players[0]!.isHost = true;
-    room.players[0]!.ready = false;
-  }
-  emitRoom(room);
 }
 
 function shuffle<T>(items: T[]): T[] {
@@ -97,7 +89,6 @@ function shuffle<T>(items: T[]): T[] {
 }
 
 function createRoleDeck(playerCount: number): Role[] {
-  // One mafia for 4–9 players, two for 10–12. Special town roles are present from 4 players.
   const mafiaCount = Math.max(1, Math.floor(playerCount / 5));
   const roles: Role[] = [
     ...Array.from({ length: mafiaCount }, () => "mafia" as const),
@@ -108,6 +99,99 @@ function createRoleDeck(playerCount: number): Role[] {
   return shuffle(roles);
 }
 
+function countAlive(room: Room, role?: Role): number {
+  return room.players.filter((player) => player.alive && (!role || room.roles.get(player.socketId) === role)).length;
+}
+
+function checkWinner(room: Room): GameWinner | null {
+  const mafia = countAlive(room, "mafia");
+  const town = countAlive(room) - mafia;
+  if (mafia === 0) return "town";
+  if (mafia >= town) return "mafia";
+  return null;
+}
+
+function finishIfWinner(room: Room): boolean {
+  const winner = checkWinner(room);
+  if (!winner) return false;
+  room.status = "finished";
+  room.phase = null;
+  room.winner = winner;
+  emitRoom(room);
+  return true;
+}
+
+function nightActionsComplete(room: Room): boolean {
+  const livingMafia = room.players.filter((player) => player.alive && room.roles.get(player.socketId) === "mafia");
+  const doctorAlive = countAlive(room, "doctor") > 0;
+  const detectiveAlive = countAlive(room, "detective") > 0;
+  return livingMafia.every((player) => room.mafiaVotes.has(player.socketId))
+    && (!doctorAlive || room.doctorTarget !== null)
+    && (!detectiveAlive || room.detectiveActed);
+}
+
+function resolveNight(room: Room): void {
+  if (room.status !== "playing" || room.phase !== "night" || !nightActionsComplete(room)) return;
+
+  const voteCounts = new Map<string, number>();
+  for (const targetId of room.mafiaVotes.values()) {
+    voteCounts.set(targetId, (voteCounts.get(targetId) ?? 0) + 1);
+  }
+
+  let victimId: string | null = null;
+  if (voteCounts.size > 0) {
+    const highest = Math.max(...voteCounts.values());
+    const tiedTargets = [...voteCounts.entries()].filter(([, votes]) => votes === highest).map(([targetId]) => targetId);
+    victimId = tiedTargets[randomInt(tiedTargets.length)]!;
+  }
+
+  const saved = victimId !== null && victimId === room.doctorTarget;
+  const victim = victimId ? room.players.find((player) => player.id === victimId && player.alive) : undefined;
+  if (victim && !saved) {
+    victim.alive = false;
+    room.lastNightMessage = `Этой ночью погиб игрок «${victim.name}».`;
+  } else if (victim && saved) {
+    room.lastNightMessage = "Этой ночью доктор спас выбранного игрока. Никто не погиб.";
+  } else {
+    room.lastNightMessage = "Этой ночью никто не погиб.";
+  }
+
+  room.mafiaVotes.clear();
+  room.doctorTarget = null;
+  room.detectiveActed = false;
+
+  if (!finishIfWinner(room)) {
+    room.phase = "day";
+  }
+  emitRoom(room);
+}
+
+function leaveCurrentRoom(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>): void {
+  const roomCode = socketRooms.get(socket.id);
+  if (!roomCode) return;
+  const room = rooms.get(roomCode);
+  socketRooms.delete(socket.id);
+  socket.leave(roomCode);
+  if (!room) return;
+
+  room.players = room.players.filter((player) => player.socketId !== socket.id);
+  room.roles.delete(socket.id);
+  room.mafiaVotes.delete(socket.id);
+  if (room.players.length === 0) {
+    rooms.delete(roomCode);
+    return;
+  }
+  if (!room.players.some((player) => player.isHost)) {
+    room.players[0]!.isHost = true;
+    room.players[0]!.ready = false;
+  }
+  if (room.status === "playing") {
+    if (!finishIfWinner(room)) resolveNight(room);
+  } else {
+    emitRoom(room);
+  }
+}
+
 io.on("connection", (socket) => {
   socket.on("room:create", ({ playerName }, callback) => {
     const name = playerName.trim().slice(0, 20);
@@ -115,8 +199,12 @@ io.on("connection", (socket) => {
 
     leaveCurrentRoom(socket);
     const code = makeRoomCode();
-    const player: RoomPlayer = { id: socket.id, socketId: socket.id, name, isHost: true, ready: false };
-    const room: Room = { code, players: [player], createdAt: Date.now(), status: "lobby", roles: new Map() };
+    const player: RoomPlayer = { id: socket.id, socketId: socket.id, name, isHost: true, ready: false, alive: true };
+    const room: Room = {
+      code, players: [player], createdAt: Date.now(), status: "lobby", phase: null, dayNumber: 0,
+      winner: null, lastNightMessage: null, roles: new Map(), mafiaVotes: new Map(),
+      doctorTarget: null, detectiveActed: false,
+    };
     rooms.set(code, room);
     socket.join(code);
     socketRooms.set(socket.id, code);
@@ -137,7 +225,7 @@ io.on("connection", (socket) => {
     }
 
     leaveCurrentRoom(socket);
-    const player: RoomPlayer = { id: socket.id, socketId: socket.id, name, isHost: false, ready: false };
+    const player: RoomPlayer = { id: socket.id, socketId: socket.id, name, isHost: false, ready: false, alive: true };
     room.players.push(player);
     socket.join(code);
     socketRooms.set(socket.id, code);
@@ -148,9 +236,7 @@ io.on("connection", (socket) => {
   socket.on("room:ready", ({ ready }, callback) => {
     const roomCode = socketRooms.get(socket.id);
     const room = roomCode ? rooms.get(roomCode) : undefined;
-    if (!room || room.status !== "lobby") {
-      return callback({ ok: false, error: "Нельзя изменить готовность сейчас." });
-    }
+    if (!room || room.status !== "lobby") return callback({ ok: false, error: "Нельзя изменить готовность сейчас." });
     const player = room.players.find((item) => item.socketId === socket.id);
     if (!player) return callback({ ok: false, error: "Игрок не найден в комнате." });
     player.ready = Boolean(ready);
@@ -169,19 +255,62 @@ io.on("connection", (socket) => {
     if (room.players.length < MIN_PLAYERS_TO_START) {
       return callback({ ok: false, error: `Для начала нужно минимум ${MIN_PLAYERS_TO_START} игрока.` });
     }
-    if (!room.players.every((player) => player.ready)) {
-      return callback({ ok: false, error: "Не все игроки готовы." });
-    }
+    if (!room.players.every((player) => player.ready)) return callback({ ok: false, error: "Не все игроки готовы." });
 
     const deck = createRoleDeck(room.players.length);
     room.roles.clear();
     room.players.forEach((player, index) => {
+      player.alive = true;
+      player.ready = false;
       const role = deck[index]!;
       room.roles.set(player.socketId, role);
       io.to(player.socketId).emit("game:role", role);
     });
     room.status = "playing";
+    room.phase = "night";
+    room.dayNumber = 1;
+    room.winner = null;
+    room.lastNightMessage = null;
+    room.mafiaVotes.clear();
+    room.doctorTarget = null;
+    room.detectiveActed = false;
     emitRoom(room);
+    callback({ ok: true, room: snapshot(room) });
+  });
+
+  socket.on("game:night-action", ({ targetId }, callback) => {
+    const roomCode = socketRooms.get(socket.id);
+    const room = roomCode ? rooms.get(roomCode) : undefined;
+    if (!room || room.status !== "playing" || room.phase !== "night") {
+      return callback({ ok: false, error: "Сейчас нельзя совершить ночное действие." });
+    }
+
+    const actor = room.players.find((player) => player.socketId === socket.id);
+    const target = room.players.find((player) => player.id === targetId && player.alive);
+    const role = room.roles.get(socket.id);
+    if (!actor || !actor.alive) return callback({ ok: false, error: "Вы не можете действовать: ваш персонаж выбыл." });
+    if (!target) return callback({ ok: false, error: "Выбранный игрок недоступен." });
+    if (role === "mafia") {
+      if (room.mafiaVotes.has(socket.id)) return callback({ ok: false, error: "Вы уже проголосовали этой ночью." });
+      if (room.roles.get(target.socketId) === "mafia") return callback({ ok: false, error: "Мафия не может выбрать своего сообщника." });
+      room.mafiaVotes.set(socket.id, target.id);
+    } else if (role === "doctor") {
+      if (room.doctorTarget !== null) return callback({ ok: false, error: "Вы уже выбрали, кого спасать." });
+      room.doctorTarget = target.id;
+    } else if (role === "detective") {
+      if (room.detectiveActed) return callback({ ok: false, error: "Вы уже провели проверку этой ночью." });
+      if (target.id === actor.id) return callback({ ok: false, error: "Нельзя проверить самого себя." });
+      room.detectiveActed = true;
+      io.to(socket.id).emit("game:investigation-result", {
+        targetId: target.id,
+        targetName: target.name,
+        isMafia: room.roles.get(target.socketId) === "mafia",
+      });
+    } else {
+      return callback({ ok: false, error: "У вашей роли нет ночного действия." });
+    }
+
+    resolveNight(room);
     callback({ ok: true, room: snapshot(room) });
   });
 
