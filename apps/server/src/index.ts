@@ -6,6 +6,7 @@ import { Server, type Socket } from "socket.io";
 import {
   MIN_PLAYERS_TO_START,
   ROOM_CODE_LENGTH,
+  type ChatMessage,
   type ClientToServerEvents,
   type GameWinner,
   type InterServerEvents,
@@ -40,6 +41,9 @@ type Room = {
   dayNumber: number;
   winner: GameWinner | null;
   lastNightMessage: string | null;
+  lastDayMessage: string | null;
+  chatMessages: ChatMessage[];
+  dayVotes: Map<string, string>;
   roles: Map<string, Role>;
   mafiaVotes: Map<string, string>;
   doctorTarget: string | null;
@@ -72,6 +76,8 @@ function snapshot(room: Room): RoomSnapshot {
     dayNumber: room.dayNumber,
     winner: room.winner,
     lastNightMessage: room.lastNightMessage,
+    lastDayMessage: room.lastDayMessage,
+    chatMessages: room.chatMessages,
   };
 }
 
@@ -166,6 +172,39 @@ function resolveNight(room: Room): void {
   emitRoom(room);
 }
 
+function resolveDay(room: Room): void {
+  if (room.status !== "playing" || room.phase !== "day") return;
+  const livingPlayers = room.players.filter((player) => player.alive);
+  if (!livingPlayers.every((player) => room.dayVotes.has(player.socketId))) return;
+
+  const counts = new Map<string, number>();
+  for (const targetId of room.dayVotes.values()) counts.set(targetId, (counts.get(targetId) ?? 0) + 1);
+  const highest = counts.size ? Math.max(...counts.values()) : 0;
+  const leaders = [...counts.entries()].filter(([, votes]) => votes === highest);
+  if (leaders.length === 1 && highest > 0) {
+    const targetId = leaders[0]![0];
+    const eliminated = room.players.find((player) => player.id === targetId && player.alive);
+    if (eliminated) {
+      eliminated.alive = false;
+      room.lastDayMessage = `Игрок «${eliminated.name}» исключён голосованием (${highest} голосов).`;
+    } else {
+      room.lastDayMessage = "Голосование не привело к исключению игрока.";
+    }
+  } else {
+    room.lastDayMessage = "Голоса разделились поровну. Никто не исключён.";
+  }
+
+  room.dayVotes.clear();
+  if (!finishIfWinner(room)) {
+    room.phase = "night";
+    room.dayNumber += 1;
+    room.mafiaVotes.clear();
+    room.doctorTarget = null;
+    room.detectiveActed = false;
+  }
+  emitRoom(room);
+}
+
 function leaveCurrentRoom(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>): void {
   const roomCode = socketRooms.get(socket.id);
   if (!roomCode) return;
@@ -177,6 +216,8 @@ function leaveCurrentRoom(socket: Socket<ClientToServerEvents, ServerToClientEve
   room.players = room.players.filter((player) => player.socketId !== socket.id);
   room.roles.delete(socket.id);
   room.mafiaVotes.delete(socket.id);
+  room.dayVotes.delete(socket.id);
+  for (const [voterId, targetId] of room.dayVotes) if (targetId === socket.id) room.dayVotes.delete(voterId);
   if (room.players.length === 0) {
     rooms.delete(roomCode);
     return;
@@ -186,7 +227,10 @@ function leaveCurrentRoom(socket: Socket<ClientToServerEvents, ServerToClientEve
     room.players[0]!.ready = false;
   }
   if (room.status === "playing") {
-    if (!finishIfWinner(room)) resolveNight(room);
+    if (!finishIfWinner(room)) {
+      if (room.phase === "night") resolveNight(room);
+      else if (room.phase === "day") resolveDay(room);
+    }
   } else {
     emitRoom(room);
   }
@@ -202,7 +246,7 @@ io.on("connection", (socket) => {
     const player: RoomPlayer = { id: socket.id, socketId: socket.id, name, isHost: true, ready: false, alive: true };
     const room: Room = {
       code, players: [player], createdAt: Date.now(), status: "lobby", phase: null, dayNumber: 0,
-      winner: null, lastNightMessage: null, roles: new Map(), mafiaVotes: new Map(),
+      winner: null, lastNightMessage: null, lastDayMessage: null, chatMessages: [], dayVotes: new Map(), roles: new Map(), mafiaVotes: new Map(),
       doctorTarget: null, detectiveActed: false,
     };
     rooms.set(code, room);
@@ -274,6 +318,9 @@ io.on("connection", (socket) => {
     room.dayNumber = 1;
     room.winner = null;
     room.lastNightMessage = null;
+    room.lastDayMessage = null;
+    room.chatMessages = [];
+    room.dayVotes.clear();
     room.mafiaVotes.clear();
     room.doctorTarget = null;
     room.detectiveActed = false;
@@ -314,6 +361,45 @@ io.on("connection", (socket) => {
     }
 
     resolveNight(room);
+    callback({ ok: true, room: snapshot(room) });
+  });
+
+  socket.on("game:day-vote", ({ targetId }, callback) => {
+    const roomCode = socketRooms.get(socket.id);
+    const room = roomCode ? rooms.get(roomCode) : undefined;
+    if (!room || room.status !== "playing" || room.phase !== "day") {
+      return callback({ ok: false, error: "Сейчас голосование недоступно." });
+    }
+    const actor = room.players.find((player) => player.socketId === socket.id);
+    const target = room.players.find((player) => player.id === targetId && player.alive);
+    if (!actor || !actor.alive) return callback({ ok: false, error: "Вы выбыли и не можете голосовать." });
+    if (!target) return callback({ ok: false, error: "Выбранный игрок уже недоступен." });
+    if (target.id === actor.id) return callback({ ok: false, error: "Нельзя голосовать за себя." });
+    if (room.dayVotes.has(socket.id)) return callback({ ok: false, error: "Вы уже проголосовали." });
+
+    room.dayVotes.set(socket.id, target.id);
+    resolveDay(room);
+    callback({ ok: true, room: snapshot(room) });
+  });
+
+  socket.on("chat:send", ({ text: rawText }, callback) => {
+    const roomCode = socketRooms.get(socket.id);
+    const room = roomCode ? rooms.get(roomCode) : undefined;
+    if (!room || room.status !== "playing") return callback({ ok: false, error: "Чат доступен только во время игры." });
+    const player = room.players.find((item) => item.socketId === socket.id);
+    if (!player || !player.alive) return callback({ ok: false, error: "Выбывшие игроки не могут писать в чат." });
+    const messageText = rawText.trim().slice(0, 240);
+    if (!messageText) return callback({ ok: false, error: "Сообщение не может быть пустым." });
+    const message: ChatMessage = {
+      id: `${socket.id}-${Date.now()}`,
+      playerId: player.id,
+      playerName: player.name,
+      text: messageText,
+      sentAt: Date.now(),
+    };
+    room.chatMessages.push(message);
+    if (room.chatMessages.length > 40) room.chatMessages.shift();
+    emitRoom(room);
     callback({ ok: true, room: snapshot(room) });
   });
 
