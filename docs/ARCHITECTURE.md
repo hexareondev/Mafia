@@ -19,7 +19,29 @@
 2. Выполнить `npm run dev`.
 3. Открыть `http://localhost:5173`.
 
-Клиент по умолчанию подключается к серверу на `http://localhost:3001`. Для другого адреса задаётся `VITE_SERVER_URL`. Сервер принимает `CLIENT_ORIGIN` и `PORT`.
+Клиент по умолчанию подключается к серверу на `http://localhost:3001`. Для другого адреса задаётся `VITE_SERVER_URL`. Сервер принимает `CLIENT_ORIGINS` (список разрешённых origin через запятую; для совместимости поддерживается и `CLIENT_ORIGIN`) и `PORT`.
+
+## Публикация
+
+### Клиент — GitHub Pages
+
+Workflow `.github/workflows/deploy-pages.yml` собирает клиент и публикует его на GitHub Pages при каждом push в `main`.
+
+1. В настройках репозитория открой **Settings → Pages** и выбери **Source: GitHub Actions**.
+2. После создания сервиса на Render добавь в **Settings → Secrets and variables → Actions → Variables** переменную репозитория `VITE_SERVER_URL` со значением публичного URL сервера, например `https://mafia-server.onrender.com` (используй фактический адрес Render).
+3. Запусти workflow **Deploy web to GitHub Pages** вручную или отправь новый commit в `main`.
+
+Ожидаемый адрес сайта: `https://hexareondev.github.io/Mafia/`.
+
+### Сервер — Render
+
+Файл `render.yaml` описывает Node web service. В Render выбери **New → Blueprint**, подключи этот репозиторий и подтверди создание сервиса. Render установит зависимости, соберёт shared package и сервер, затем запустит Node.js приложение. Переменная `PORT` предоставляется платформой автоматически.
+
+Проверка работоспособности: открыть `https://<имя-сервиса>.onrender.com/health`; ожидается JSON `{"status":"ok","service":"mafia-server"}`.
+
+CORS разрешает origin GitHub Pages и локальный Vite. Если будет использоваться другой домен, обнови `CLIENT_ORIGINS` в настройках Render.
+
+> Важно: комнаты сейчас хранятся в памяти процесса. Перезапуск или сон/пробуждение бесплатного сервиса может удалить все открытые комнаты. Для долгоживущих комнат понадобится внешнее хранилище и отдельная работа с reconnect.
 
 ## Принципы
 
