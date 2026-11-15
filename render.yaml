@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: mafia-server
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build -w @mafia/shared && npm run build -w @mafia/server
+    startCommand: npm run start -w @mafia/server
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: CLIENT_ORIGINS
+        value: https://hexareondev.github.io,http://localhost:5173
