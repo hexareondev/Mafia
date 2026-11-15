@@ -37,3 +37,15 @@ footer{margin-top:auto;padding:22px 0;color:#716b71;font-size:9px;font-weight:70
 .players-list{border-top:1px solid #ffffff16}.player-row{min-height:57px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #ffffff12;color:#e5dcd6;font-size:13px}.player-avatar{width:30px;height:30px;display:grid;place-items:center;background:#3a3036;color:#d2a37c;border-radius:50%;font-family:'Playfair Display',serif}.player-row small{display:flex;align-items:center;gap:4px;color:#bd987a;font-size:8px;letter-spacing:.1em}.player-number{margin-left:auto;color:#655f65;font-size:10px}
 .waiting-note{text-align:center;color:#8d858a;font-size:11px;margin-top:23px}.error-message{color:#e49a8f;font-size:11px;margin:12px 0 0}
 @media(max-width:560px){.app-shell{padding:0 6%}.topbar{height:68px}.landing{margin-top:65px}.feature-row{flex-direction:column;gap:11px}.lobby-card,.room-code-card{padding:19px}.room-view{margin-top:34px}.room-view h1{font-size:56px}}
+
+
+.ready-state{margin-left:auto;color:#8b8184;font-size:8px;font-weight:700;letter-spacing:.08em;white-space:nowrap}
+.ready-state.is-ready{color:#83b58b}
+.lobby-actions{display:flex;gap:10px;margin-top:22px}
+.lobby-actions .secondary-button,.lobby-actions .primary-button{flex:1;margin:0}
+.start-button{background:#b88966;color:#171216}
+.role-card{padding:30px;background:#1b191f;border:1px solid #bd987a55;border-radius:9px;text-align:center}
+.role-card svg{color:#c69a74}
+.role-card p{color:#e5dcd6;font-size:15px;line-height:1.7}
+.role-card small{color:#9c9296;font-size:10px}
+@media(max-width:560px){.lobby-actions{flex-direction:column}.ready-state{font-size:7px}}
