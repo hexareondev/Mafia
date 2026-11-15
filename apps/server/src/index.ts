@@ -265,6 +265,9 @@ io.on("connection", (socket) => {
       const role = deck[index]!;
       room.roles.set(player.socketId, role);
       io.to(player.socketId).emit("game:role", role);
+      if (role === "mafia") {
+        io.to(player.socketId).emit("game:mafia-team", room.players.filter((member) => deck[room.players.indexOf(member)] === "mafia").map((member) => member.id));
+      }
     });
     room.status = "playing";
     room.phase = "night";
