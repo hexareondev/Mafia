@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import { ArrowLeft, Check, Copy, Crown, DoorOpen, Moon, Shield, Users } from "lucide-react";
+import { ArrowLeft, Check, Copy, Crown, DoorOpen, MessageCircle, Moon, Send, Shield, Users } from "lucide-react";
 import type { ClientToServerEvents, ServerToClientEvents, RoomSnapshot, Role } from "@mafia/shared";
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? "http://localhost:3001";
@@ -23,6 +23,8 @@ export default function App() {
   const [investigationResult, setInvestigationResult] = useState<{ targetId: string; targetName: string; isMafia: boolean } | null>(null);
   const [mafiaTeamIds, setMafiaTeamIds] = useState<string[]>([]);
   const [nightActionSubmitted, setNightActionSubmitted] = useState(false);
+  const [dayVoteSubmitted, setDayVoteSubmitted] = useState(false);
+  const [chatDraft, setChatDraft] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -39,6 +41,11 @@ export default function App() {
     setSocket(connection);
     return () => { connection.disconnect(); };
   }, []);
+
+  useEffect(() => {
+    if (room?.phase === "night") setNightActionSubmitted(false);
+    if (room?.phase === "day") setDayVoteSubmitted(false);
+  }, [room?.phase, room?.dayNumber]);
 
   const createRoom = () => {
     if (!socket) return;
@@ -88,6 +95,24 @@ export default function App() {
     setError("");
     socket.emit("game:night-action", { targetId }, (result) => {
       if (result.ok) { setRoom(result.room); setNightActionSubmitted(true); }
+      else setError(result.error);
+    });
+  };
+
+  const voteDay = (targetId: string) => {
+    if (!socket) return;
+    setError("");
+    socket.emit("game:day-vote", { targetId }, (result) => {
+      if (result.ok) { setRoom(result.room); setDayVoteSubmitted(true); }
+      else setError(result.error);
+    });
+  };
+
+  const sendChatMessage = () => {
+    if (!socket || !chatDraft.trim()) return;
+    setError("");
+    socket.emit("chat:send", { text: chatDraft }, (result) => {
+      if (result.ok) { setRoom(result.room); setChatDraft(""); }
       else setError(result.error);
     });
   };
@@ -172,14 +197,32 @@ export default function App() {
                     )
                   ) : <p className="waiting-note">Вы выбыли и больше не можете совершать действия.</p>}
                   {investigationResult && <div className="investigation-result"><strong>Результат проверки</strong><span>{investigationResult.targetName}: {investigationResult.isMafia ? "мафия" : "не мафия"}</span></div>}
+                  {room.lastDayMessage && <p className="day-result">{room.lastDayMessage}</p>}
                   <p className="waiting-note">Ночь закончится, когда все живые мафия, доктор и комиссар выполнят свои действия.</p>
                 </section>
               ) : (
                 <section className="game-panel">
                   <div className="phase-label"><Users size={16} /> ДЕНЬ {room.dayNumber}</div>
                   <h2>Город просыпается</h2>
-                  <p className="day-result">{room.lastNightMessage ?? "Наступил новый день."}</p>
-                  <p className="waiting-note">Дневное обсуждение и голосование будут добавлены следующим этапом. Пока партия остановлена на дневной фазе.</p>
+                  <p className="day-result">{room.lastNightMessage ?? "Этой ночью никто не погиб."}</p>
+                  <div className="discussion-panel">
+                    <div className="discussion-heading"><MessageCircle size={15} /> Обсуждение</div>
+                    <div className="chat-messages">
+                      {room.chatMessages.map((message) => <div className={message.playerId === socket?.id ? "chat-message own-message" : "chat-message"} key={message.id}><strong>{message.playerName}</strong><span>{message.text}</span></div>)}
+                      {!room.chatMessages.length && <p className="chat-empty">Пока сообщений нет. Начните обсуждение.</p>}
+                    </div>
+                    <div className="chat-compose">
+                      <input maxLength={240} value={chatDraft} onChange={(event) => setChatDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") sendChatMessage(); }} placeholder="Ваше сообщение..." />
+                      <button onClick={sendChatMessage} disabled={!chatDraft.trim()} aria-label="Отправить сообщение"><Send size={16} /></button>
+                    </div>
+                  </div>
+                  <div className="vote-panel">
+                    <strong>Голосование</strong>
+                    <p>{dayVoteSubmitted ? "Ваш голос принят. Ожидаем остальных игроков." : "Выберите игрока, которого считаете мафией. Свой голос изменить нельзя."}</p>
+                    <div className="target-list">
+                      {room.players.filter((player) => player.alive && player.id !== socket?.id).map((player) => <button className="target-button" key={player.id} disabled={dayVoteSubmitted} onClick={() => voteDay(player.id)}>{player.name}<span>{dayVoteSubmitted ? "Голос принят" : "Голосовать"}</span></button>)}
+                    </div>
+                  </div>
                 </section>
               )}
               <div className="game-roster">
