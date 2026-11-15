@@ -40,6 +40,7 @@ export interface ClientToServerEvents {
 export interface ServerToClientEvents {
   "room:updated": (room: RoomSnapshot) => void;
   "game:role": (role: Role) => void;
+  "game:mafia-team": (playerIds: string[]) => void;
   "game:investigation-result": (result: { targetId: string; targetName: string; isMafia: boolean }) => void;
 }
 
