@@ -49,3 +49,22 @@ footer{margin-top:auto;padding:22px 0;color:#716b71;font-size:9px;font-weight:70
 .role-card p{color:#e5dcd6;font-size:15px;line-height:1.7}
 .role-card small{color:#9c9296;font-size:10px}
 @media(max-width:560px){.lobby-actions{flex-direction:column}.ready-state{font-size:7px}}
+
+
+.game-panel{margin-top:24px;padding:24px;background:#1b191f;border:1px solid #ffffff18;border-radius:9px}
+.phase-label{display:flex;align-items:center;gap:8px;color:#c69a74;font-size:10px;font-weight:700;letter-spacing:.16em}
+.game-panel h2{font-family:'Playfair Display',serif;font-size:27px;font-weight:500;margin:15px 0 8px;color:#eee5df}
+.game-hint,.day-result{color:#b4a9a7;font-size:12px;line-height:1.65}
+.target-list{display:grid;gap:8px;margin-top:18px}
+.target-button{display:flex;align-items:center;justify-content:space-between;width:100%;padding:13px 14px;color:#e9dfd8;background:#28232a;border:1px solid #ffffff18;border-radius:5px;text-align:left;font-size:12px}
+.target-button span{color:#c69a74;font-size:10px;font-weight:700}
+.target-button:hover:not(:disabled){border-color:#bd987a88;background:#332a30}
+.investigation-result{display:flex;flex-direction:column;gap:7px;margin-top:17px;padding:14px;background:#28232a;border-left:2px solid #bd987a;color:#e8ddd5;font-size:12px}
+.investigation-result span{color:#c69a74}
+.game-roster{margin-top:24px}
+.game-roster>strong{display:block;margin-bottom:10px;color:#d8cec8;font-size:12px}
+.game-player{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #ffffff12;color:#e5dcd6;font-size:12px}
+.game-player small{color:#83b58b;font-size:10px}
+.game-player.is-dead{opacity:.5}
+.game-player.is-dead span{text-decoration:line-through}
+@media(max-width:560px){.game-panel{padding:18px}}
