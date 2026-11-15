@@ -177,6 +177,7 @@ export default function App() {
                 <Shield size={28} />
                 <p>{ROLE_INFO[role].description}</p>
                 <small>Не показывайте эту карточку другим игрокам.</small>
+                {role === "mafia" && <small className="mafia-allies">Союзники: {room.players.filter((player) => mafiaTeamIds.includes(player.id)).map((player) => player.name).join(", ")}</small>}
               </div>
               {room.phase === "night" ? (
                 <section className="game-panel">
@@ -205,24 +206,28 @@ export default function App() {
                   <div className="phase-label"><Users size={16} /> ДЕНЬ {room.dayNumber}</div>
                   <h2>Город просыпается</h2>
                   <p className="day-result">{room.lastNightMessage ?? "Этой ночью никто не погиб."}</p>
-                  <div className="discussion-panel">
-                    <div className="discussion-heading"><MessageCircle size={15} /> Обсуждение</div>
-                    <div className="chat-messages">
-                      {room.chatMessages.map((message) => <div className={message.playerId === socket?.id ? "chat-message own-message" : "chat-message"} key={message.id}><strong>{message.playerName}</strong><span>{message.text}</span></div>)}
-                      {!room.chatMessages.length && <p className="chat-empty">Пока сообщений нет. Начните обсуждение.</p>}
+                  {room.players.find((player) => player.id === socket?.id)?.alive ? (
+                    <>
+                    <div className="discussion-panel">
+                      <div className="discussion-heading"><MessageCircle size={15} /> Обсуждение</div>
+                      <div className="chat-messages">
+                        {room.chatMessages.map((message) => <div className={message.playerId === socket?.id ? "chat-message own-message" : "chat-message"} key={message.id}><strong>{message.playerName}</strong><span>{message.text}</span></div>)}
+                        {!room.chatMessages.length && <p className="chat-empty">Пока сообщений нет. Начните обсуждение.</p>}
+                      </div>
+                      <div className="chat-compose">
+                        <input maxLength={240} value={chatDraft} onChange={(event) => setChatDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") sendChatMessage(); }} placeholder="Ваше сообщение..." />
+                        <button onClick={sendChatMessage} disabled={!chatDraft.trim()} aria-label="Отправить сообщение"><Send size={16} /></button>
+                      </div>
                     </div>
-                    <div className="chat-compose">
-                      <input maxLength={240} value={chatDraft} onChange={(event) => setChatDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") sendChatMessage(); }} placeholder="Ваше сообщение..." />
-                      <button onClick={sendChatMessage} disabled={!chatDraft.trim()} aria-label="Отправить сообщение"><Send size={16} /></button>
+                    <div className="vote-panel">
+                      <strong>Голосование</strong>
+                      <p>{dayVoteSubmitted ? "Ваш голос принят. Ожидаем остальных игроков." : "Выберите игрока, которого считаете мафией. Свой голос изменить нельзя."}</p>
+                      <div className="target-list">
+                        {room.players.filter((player) => player.alive && player.id !== socket?.id).map((player) => <button className="target-button" key={player.id} disabled={dayVoteSubmitted} onClick={() => voteDay(player.id)}>{player.name}<span>{dayVoteSubmitted ? "Голос принят" : "Голосовать"}</span></button>)}
+                      </div>
                     </div>
-                  </div>
-                  <div className="vote-panel">
-                    <strong>Голосование</strong>
-                    <p>{dayVoteSubmitted ? "Ваш голос принят. Ожидаем остальных игроков." : "Выберите игрока, которого считаете мафией. Свой голос изменить нельзя."}</p>
-                    <div className="target-list">
-                      {room.players.filter((player) => player.alive && player.id !== socket?.id).map((player) => <button className="target-button" key={player.id} disabled={dayVoteSubmitted} onClick={() => voteDay(player.id)}>{player.name}<span>{dayVoteSubmitted ? "Голос принят" : "Голосовать"}</span></button>)}
-                    </div>
-                  </div>
+                    </>
+                  ) : <p className="waiting-note">Вы выбыли. Вы можете наблюдать за игрой, но не можете писать и голосовать.</p>}
                 </section>
               )}
               <div className="game-roster">
