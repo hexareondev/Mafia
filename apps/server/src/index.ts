@@ -12,14 +12,17 @@ import {
 } from "@mafia/shared";
 
 const PORT = Number(process.env.PORT ?? 3001);
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? "http://localhost:5173";
+const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS ?? process.env.CLIENT_ORIGIN ?? "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 const app = express();
-app.use(cors({ origin: CLIENT_ORIGIN }));
+app.use(cors({ origin: CLIENT_ORIGINS }));
 app.get("/health", (_req, res) => res.json({ status: "ok", service: "mafia-server" }));
 
 const httpServer = createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(httpServer, {
-  cors: { origin: CLIENT_ORIGIN, methods: ["GET", "POST"] },
+  cors: { origin: CLIENT_ORIGINS, methods: ["GET", "POST"] },
 });
 
 type RoomPlayer = PlayerSummary & { socketId: string };
@@ -106,5 +109,5 @@ io.on("connection", (socket) => {
 });
 
 httpServer.listen(PORT, () => {
-  console.log(`Mafia server listening on http://localhost:${PORT}`);
+  console.log(`Mafia server listening on port ${PORT}`);
 });
