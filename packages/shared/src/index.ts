@@ -5,6 +5,8 @@ export type Role = "mafia" | "doctor" | "detective" | "citizen";
 export type GamePhase = "night" | "day";
 export type GameWinner = "mafia" | "town";
 
+export type ChatMessage = { id: string; playerId: string; playerName: string; text: string; sentAt: number };
+
 export type PlayerSummary = {
   id: string;
   name: string;
@@ -22,6 +24,8 @@ export type RoomSnapshot = {
   dayNumber: number;
   winner: GameWinner | null;
   lastNightMessage: string | null;
+  lastDayMessage: string | null;
+  chatMessages: ChatMessage[];
 };
 
 export type ActionResult =
@@ -35,6 +39,8 @@ export interface ClientToServerEvents {
   "room:ready": (payload: { ready: boolean }, callback: (result: ActionResult) => void) => void;
   "game:start": (callback: (result: ActionResult) => void) => void;
   "game:night-action": (payload: { targetId: string }, callback: (result: ActionResult) => void) => void;
+  "game:day-vote": (payload: { targetId: string }, callback: (result: ActionResult) => void) => void;
+  "chat:send": (payload: { text: string }, callback: (result: ActionResult) => void) => void;
 }
 
 export interface ServerToClientEvents {
