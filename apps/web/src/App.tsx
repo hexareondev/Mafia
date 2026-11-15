@@ -21,6 +21,8 @@ export default function App() {
   const [room, setRoom] = useState<RoomSnapshot | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [investigationResult, setInvestigationResult] = useState<{ targetId: string; targetName: string; isMafia: boolean } | null>(null);
+  const [mafiaTeamIds, setMafiaTeamIds] = useState<string[]>([]);
+  const [nightActionSubmitted, setNightActionSubmitted] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -32,6 +34,7 @@ export default function App() {
       if (nextRoom.status === "lobby") setRole(null);
     });
     connection.on("game:role", setRole);
+    connection.on("game:mafia-team", setMafiaTeamIds);
     connection.on("game:investigation-result", setInvestigationResult);
     setSocket(connection);
     return () => { connection.disconnect(); };
@@ -41,7 +44,7 @@ export default function App() {
     if (!socket) return;
     setError("");
     socket.emit("room:create", { playerName: name }, (result) => {
-      if (result.ok) { setRoom(result.room); setRole(null); setInvestigationResult(null); }
+      if (result.ok) { setRoom(result.room); setRole(null); setInvestigationResult(null); setMafiaTeamIds([]); setNightActionSubmitted(false); }
       else setError(result.error);
     });
   };
@@ -84,7 +87,7 @@ export default function App() {
     if (!socket) return;
     setError("");
     socket.emit("game:night-action", { targetId }, (result) => {
-      if (result.ok) setRoom(result.room);
+      if (result.ok) { setRoom(result.room); setNightActionSubmitted(true); }
       else setError(result.error);
     });
   };
@@ -161,8 +164,8 @@ export default function App() {
                       <>
                         <p className="game-hint">{role === "mafia" ? "Выберите игрока для устранения. Если мафиози несколько, решение будет принято по большинству голосов." : role === "doctor" ? "Выберите игрока, которого хотите защитить этой ночью. Можно спасти и себя." : "Выберите игрока для тайной проверки. Результат увидите только вы."}</p>
                         <div className="target-list">
-                          {room.players.filter((player) => player.alive && (role !== "detective" || player.id !== socket?.id) && (role !== "mafia" || player.id !== socket?.id && room.players.find((p) => p.id === player.id))).map((player) => (
-                            <button className="target-button" key={player.id} onClick={() => performNightAction(player.id)}>{player.name}<span>Выбрать</span></button>
+                          {room.players.filter((player) => player.alive && (role !== "detective" || player.id !== socket?.id) && (role !== "mafia" || !mafiaTeamIds.includes(player.id))).map((player) => (
+                            <button className="target-button" key={player.id} disabled={nightActionSubmitted} onClick={() => performNightAction(player.id)}>{player.name}<span>{nightActionSubmitted ? "Ход принят" : "Выбрать"}</span></button>
                           ))}
                         </div>
                       </>
