@@ -41,6 +41,9 @@ jobs:
       - name: Build shared package
         run: npm run build -w @mafia/shared
 
+      - name: Build server
+        run: npm run build -w @mafia/server
+
       - name: Build web app
         run: npm run build -w @mafia/web
         env:
