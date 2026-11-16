@@ -1,10 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { ArrowLeft, Check, Copy, Crown, DoorOpen, MessageCircle, Moon, Send, Shield, Users } from "lucide-react";
-import type { ClientToServerEvents, ServerToClientEvents, RoomSnapshot, Role } from "@mafia/shared";
+import type { ClientToServerEvents, ServerToClientEvents, RoomSnapshot, Role, PlayerSession } from "@mafia/shared";
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? "http://localhost:3001";
 type MafiaSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+const SESSION_STORAGE_KEY = "mafia.playerSession";
+
+function readStoredSession(): PlayerSession | null {
+  try {
+    const value = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!value) return null;
+    const parsed = JSON.parse(value) as PlayerSession;
+    return parsed && typeof parsed.roomCode === "string" && typeof parsed.playerId === "string" && typeof parsed.token === "string"
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function formatTime(endsAt: number | null, now: number): string {
   if (endsAt === null) return "--:--";
@@ -25,6 +39,7 @@ export default function App() {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [room, setRoom] = useState<RoomSnapshot | null>(null);
+  const [session, setSession] = useState<PlayerSession | null>(() => readStoredSession());
   const activeRoomRef = useRef<RoomSnapshot | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [investigationResult, setInvestigationResult] = useState<{ targetId: string; targetName: string; isMafia: boolean } | null>(null);
@@ -43,13 +58,34 @@ export default function App() {
     const connection: MafiaSocket = io(SERVER_URL, { autoConnect: true, reconnection: true });
     connection.on("connect", () => {
       setConnected(true);
-      if (!connection.recovered && activeRoomRef.current) {
-        setRoom(null);
-        activeRoomRef.current = null;
-        setRole(null);
-        setInvestigationResult(null);
-        setMafiaTeamIds([]);
-        setError("Соединение восстановлено, но игровую сессию вернуть не удалось. Подключитесь к комнате заново.");
+      if (!connection.recovered) {
+        const savedSession = readStoredSession();
+        if (savedSession) {
+          connection.emit("room:rejoin", savedSession, (result) => {
+            if (result.ok) {
+              const nextSession = result.session ?? savedSession;
+              localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextSession));
+              setSession(nextSession);
+              setRoom(result.room);
+              activeRoomRef.current = result.room;
+              setError("");
+            } else {
+              localStorage.removeItem(SESSION_STORAGE_KEY);
+              setSession(null);
+              setRoom(null);
+              activeRoomRef.current = null;
+              setRole(null);
+              setError(result.error);
+            }
+          });
+        } else if (activeRoomRef.current) {
+          setRoom(null);
+          activeRoomRef.current = null;
+          setRole(null);
+          setInvestigationResult(null);
+          setMafiaTeamIds([]);
+          setError("Соединение восстановлено, но игровую сессию вернуть не удалось. Подключитесь к комнате заново.");
+        }
       }
     });
     connection.on("disconnect", () => setConnected(false));
@@ -78,7 +114,7 @@ export default function App() {
     if (!socket) return;
     setError("");
     socket.emit("room:create", { playerName: name }, (result) => {
-      if (result.ok) { setRoom(result.room); setRole(null); setInvestigationResult(null); setMafiaTeamIds([]); setNightActionSubmitted(false); }
+      if (result.ok) { setRoom(result.room); setRole(null); setInvestigationResult(null); setMafiaTeamIds([]); setNightActionSubmitted(false); if (result.session) { setSession(result.session); localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(result.session)); } }
       else setError(result.error);
     });
   };
@@ -87,13 +123,15 @@ export default function App() {
     if (!socket) return;
     setError("");
     socket.emit("room:join", { code, playerName: name }, (result) => {
-      if (result.ok) { setRoom(result.room); setRole(null); }
+      if (result.ok) { setRoom(result.room); setRole(null); if (result.session) { setSession(result.session); localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(result.session)); } }
       else setError(result.error);
     });
   };
 
   const leaveRoom = () => {
     socket?.emit("room:leave");
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    setSession(null);
     setRoom(null);
     setRole(null);
     setError("");
@@ -150,7 +188,7 @@ export default function App() {
     catch { setError("Не удалось скопировать код. Вы можете выделить его вручную."); }
   };
 
-  const isHost = room?.hostId === socket?.id;
+  const isHost = room?.hostId === session?.playerId;
   const allReady = Boolean(room?.players.length && room.players.every((player) => player.ready));
   const canStart = Boolean(isHost && room && room.players.length >= 4 && allReady && room.status === "lobby");
 
@@ -210,14 +248,14 @@ export default function App() {
                 <section className="game-panel">
                   <div className="phase-label"><Moon size={16} /> НОЧЬ {room.dayNumber}<span className="phase-timer">{formatTime(room.phaseEndsAt, clockNow)}</span></div>
                   <h2>Город засыпает</h2>
-                  {room.players.find((player) => player.id === socket?.id)?.alive ? (
+                  {room.players.find((player) => player.id === session?.playerId)?.alive ? (
                     role === "citizen" ? (
                       <p className="waiting-note">У мирного жителя нет ночного действия. Ожидайте рассвета.</p>
                     ) : (
                       <>
                         <p className="game-hint">{role === "mafia" ? "Выберите игрока для устранения. Если мафиози несколько, решение будет принято по большинству голосов." : role === "doctor" ? "Выберите игрока, которого хотите защитить этой ночью. Можно спасти и себя." : "Выберите игрока для тайной проверки. Результат увидите только вы."}</p>
                         <div className="target-list">
-                          {room.players.filter((player) => player.alive && (role !== "detective" || player.id !== socket?.id) && (role !== "mafia" || !mafiaTeamIds.includes(player.id))).map((player) => (
+                          {room.players.filter((player) => player.alive && (role !== "detective" || player.id !== session?.playerId) && (role !== "mafia" || !mafiaTeamIds.includes(player.id))).map((player) => (
                             <button className="target-button" key={player.id} disabled={nightActionSubmitted} onClick={() => performNightAction(player.id)}>{player.name}<span>{nightActionSubmitted ? "Ход принят" : "Выбрать"}</span></button>
                           ))}
                         </div>
@@ -233,12 +271,12 @@ export default function App() {
                   <div className="phase-label"><Users size={16} /> ДЕНЬ {room.dayNumber}<span className="phase-timer">{formatTime(room.phaseEndsAt, clockNow)}</span></div>
                   <h2>Город просыпается</h2>
                   <p className="day-result">{room.lastNightMessage ?? "Этой ночью никто не погиб."}</p>
-                  {room.players.find((player) => player.id === socket?.id)?.alive ? (
+                  {room.players.find((player) => player.id === session?.playerId)?.alive ? (
                     <>
                     <div className="discussion-panel">
                       <div className="discussion-heading"><MessageCircle size={15} /> Обсуждение</div>
                       <div className="chat-messages">
-                        {room.chatMessages.map((message) => <div className={message.playerId === socket?.id ? "chat-message own-message" : "chat-message"} key={message.id}><strong>{message.playerName}</strong><span>{message.text}</span></div>)}
+                        {room.chatMessages.map((message) => <div className={message.playerId === session?.playerId ? "chat-message own-message" : "chat-message"} key={message.id}><strong>{message.playerName}</strong><span>{message.text}</span></div>)}
                         {!room.chatMessages.length && <p className="chat-empty">Пока сообщений нет. Начните обсуждение.</p>}
                       </div>
                       <div className="chat-compose">
@@ -250,7 +288,7 @@ export default function App() {
                       <strong>Голосование</strong>
                       <p>{dayVoteSubmitted ? "Ваш голос принят. Ожидаем остальных игроков." : "Выберите игрока, которого считаете мафией. Свой голос изменить нельзя."}</p>
                       <div className="target-list">
-                        {room.players.filter((player) => player.alive && player.id !== socket?.id).map((player) => <button className="target-button" key={player.id} disabled={dayVoteSubmitted} onClick={() => voteDay(player.id)}>{player.name}<span>{dayVoteSubmitted ? "Голос принят" : "Голосовать"}</span></button>)}
+                        {room.players.filter((player) => player.alive && player.id !== session?.playerId).map((player) => <button className="target-button" key={player.id} disabled={dayVoteSubmitted} onClick={() => voteDay(player.id)}>{player.name}<span>{dayVoteSubmitted ? "Голос принят" : "Голосовать"}</span></button>)}
                       </div>
                     </div>
                     </>
@@ -290,8 +328,8 @@ export default function App() {
                 ))}
               </div>
               <div className="lobby-actions">
-                <button className="secondary-button" onClick={() => setReady(!room.players.find((player) => player.id === socket?.id)?.ready)}>
-                  <Check size={16} /> {room.players.find((player) => player.id === socket?.id)?.ready ? "Я не готов" : "Я готов"}
+                <button className="secondary-button" onClick={() => setReady(!room.players.find((player) => player.id === session?.playerId)?.ready)}>
+                  <Check size={16} /> {room.players.find((player) => player.id === session?.playerId)?.ready ? "Я не готов" : "Я готов"}
                 </button>
                 {isHost && <button className="primary-button start-button" disabled={!canStart} onClick={startGame}>Начать игру</button>}
               </div>
