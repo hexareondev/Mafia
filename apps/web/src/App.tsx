@@ -183,10 +183,18 @@ export default function App() {
     });
   };
 
-  const copyCode = async () => {
+  const copyRoomCode = async () => {
     if (!room) return;
     try { await navigator.clipboard.writeText(room.code); }
     catch { setError("Не удалось скопировать код. Вы можете выделить его вручную."); }
+  };
+
+  const copyInviteLink = async () => {
+    if (!room) return;
+    const inviteUrl = new URL(window.location.pathname, window.location.origin);
+    inviteUrl.searchParams.set("room", room.code);
+    try { await navigator.clipboard.writeText(inviteUrl.toString()); }
+    catch { setError("Не удалось скопировать ссылку. Попробуйте скопировать её вручную."); }
   };
 
   const isHost = room?.hostId === session?.playerId;
@@ -208,8 +216,9 @@ export default function App() {
           <div className="lobby-card">
             <label htmlFor="player-name">Как вас называть?</label>
             <input id="player-name" maxLength={20} placeholder="Ваше имя" value={name} onChange={(event) => setName(event.target.value)} />
-            <button className="primary-button" disabled={!connected || !name.trim()} onClick={createRoom}><Users size={17} /> Создать комнату</button>
-            <div className="separator"><span /> ИЛИ ПРИСОЕДИНИТЬСЯ <span /></div>
+            {!inviteCodeFromUrl && <button className="primary-button" disabled={!connected || !name.trim()} onClick={createRoom}><Users size={17} /> Создать комнату</button>}
+            {!inviteCodeFromUrl && <div className="separator"><span /> ИЛИ ПРИСОЕДИНИТЬСЯ <span /></div>}
+            {inviteCodeFromUrl && <p className="invite-hint">Вас пригласили в комнату. Введите ник, чтобы присоединиться.</p>}
             <div className="join-row">
               <input aria-label="Код комнаты" maxLength={5} placeholder="КОД" value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} />
               <button className="secondary-button" disabled={!connected || !name.trim() || code.trim().length !== 5} onClick={joinRoom}>{inviteCodeFromUrl ? "Войти в комнату" : "Войти"} <DoorOpen size={16} /></button>
@@ -313,8 +322,8 @@ export default function App() {
               <h1>Собираем<br /><em>компанию.</em></h1>
               <div className="room-code-card">
                 <span>КОД ПРИГЛАШЕНИЯ</span>
-                <div className="code-line"><strong>{room.code}</strong><button onClick={copyCode} aria-label="Скопировать код"><Copy size={17} /></button></div>
-                <p>Отправьте этот код друзьям, чтобы они могли войти.</p>
+                <div className="code-line"><strong>{room.code}</strong><div className="code-actions"><button onClick={copyRoomCode} aria-label="Скопировать код" title="Скопировать код"><Copy size={17} /></button><button onClick={copyInviteLink} aria-label="Скопировать ссылку-приглашение" title="Скопировать ссылку-приглашение"><DoorOpen size={17} /></button></div></div>
+                <p>Скопируйте код или ссылку — по ссылке друзьям останется только ввести ник.</p>
               </div>
               <div className="players-heading"><span><Users size={17} /> Игроки</span><b>{room.players.length} / 12</b></div>
               <div className="players-list">
