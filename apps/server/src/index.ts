@@ -267,6 +267,9 @@ function leaveCurrentRoom(socket: Socket<ClientToServerEvents, ServerToClientEve
   } else {
     emitRoom(room);
   }
+  if (room.players.length > 0) {
+    void saveStoredRoom(room).catch((error: unknown) => console.error("Failed to persist room after player leave:", error));
+  }
 }
 
 io.on("connection", (socket) => {
@@ -416,6 +419,7 @@ io.on("connection", (socket) => {
       return callback({ ok: false, error: "У вашей роли нет ночного действия." });
     }
 
+    void saveStoredRoom(room).catch((error: unknown) => console.error("Failed to persist night action:", error));
     resolveNight(room);
     callback({ ok: true, room: snapshot(room) });
   });
@@ -434,6 +438,7 @@ io.on("connection", (socket) => {
     if (room.dayVotes.has(socket.id)) return callback({ ok: false, error: "Вы уже проголосовали." });
 
     room.dayVotes.set(socket.id, target.id);
+    void saveStoredRoom(room).catch((error: unknown) => console.error("Failed to persist day vote:", error));
     resolveDay(room);
     callback({ ok: true, room: snapshot(room) });
   });
