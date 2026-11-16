@@ -27,6 +27,7 @@ export async function initializeRoomStorage<T extends PersistableRoom>(): Promis
   await redis.connect();
   client = redis;
   enabled = true;
+  console.log("Connected to Redis room storage.");
 
   const restored: T[] = [];
   for await (const key of redis.scanIterator({ MATCH: `${REDIS_PREFIX}*`, COUNT: 100 })) {
@@ -77,4 +78,8 @@ export async function deleteStoredRoom(code: string): Promise<void> {
   const pending = writeQueues.get(code);
   if (pending) await pending.catch(() => undefined);
   if (enabled && client) await client.del(`${REDIS_PREFIX}${code}`);
+}
+
+export function getRoomStorageMode(): "redis" | "memory" {
+  return enabled ? "redis" : "memory";
 }
