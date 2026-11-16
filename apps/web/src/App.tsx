@@ -6,6 +6,12 @@ import type { ClientToServerEvents, ServerToClientEvents, RoomSnapshot, Role } f
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? "http://localhost:3001";
 type MafiaSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
+function formatTime(endsAt: number | null, now: number): string {
+  if (endsAt === null) return "--:--";
+  const seconds = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 const ROLE_INFO: Record<Role, { title: string; description: string }> = {
   mafia: { title: "Мафия", description: "Ночью выбирай, кого устранить. Днём скрывай свою личность." },
   doctor: { title: "Доктор", description: "Ночью выбирай игрока, которого хочешь спасти." },
@@ -26,6 +32,7 @@ export default function App() {
   const [dayVoteSubmitted, setDayVoteSubmitted] = useState(false);
   const [chatDraft, setChatDraft] = useState("");
   const [error, setError] = useState("");
+  const [clockNow, setClockNow] = useState(Date.now());
 
   useEffect(() => {
     const connection: MafiaSocket = io(SERVER_URL, { autoConnect: true, reconnection: true });
@@ -40,6 +47,11 @@ export default function App() {
     connection.on("game:investigation-result", setInvestigationResult);
     setSocket(connection);
     return () => { connection.disconnect(); };
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setClockNow(Date.now()), 250);
+    return () => window.clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -181,7 +193,7 @@ export default function App() {
               </div>
               {room.phase === "night" ? (
                 <section className="game-panel">
-                  <div className="phase-label"><Moon size={16} /> НОЧЬ {room.dayNumber}</div>
+                  <div className="phase-label"><Moon size={16} /> НОЧЬ {room.dayNumber}<span className="phase-timer">{formatTime(room.phaseEndsAt, clockNow)}</span></div>
                   <h2>Город засыпает</h2>
                   {room.players.find((player) => player.id === socket?.id)?.alive ? (
                     role === "citizen" ? (
@@ -203,7 +215,7 @@ export default function App() {
                 </section>
               ) : (
                 <section className="game-panel">
-                  <div className="phase-label"><Users size={16} /> ДЕНЬ {room.dayNumber}</div>
+                  <div className="phase-label"><Users size={16} /> ДЕНЬ {room.dayNumber}<span className="phase-timer">{formatTime(room.phaseEndsAt, clockNow)}</span></div>
                   <h2>Город просыпается</h2>
                   <p className="day-result">{room.lastNightMessage ?? "Этой ночью никто не погиб."}</p>
                   {room.players.find((player) => player.id === socket?.id)?.alive ? (
