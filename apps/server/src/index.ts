@@ -20,6 +20,7 @@ import {
 const PORT = Number(process.env.PORT ?? 3001);
 const NIGHT_DURATION_MS = Math.max(15, Number(process.env.NIGHT_DURATION_SECONDS ?? 60)) * 1000;
 const DAY_DURATION_MS = Math.max(30, Number(process.env.DAY_DURATION_SECONDS ?? 180)) * 1000;
+const DISCONNECT_GRACE_MS = 2 * 60 * 1000;
 const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS ?? process.env.CLIENT_ORIGIN ?? "http://localhost:5173")
   .split(",")
   .map((origin) => origin.trim())
@@ -31,6 +32,7 @@ app.get("/health", (_req, res) => res.json({ status: "ok", service: "mafia-serve
 const httpServer = createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(httpServer, {
   cors: { origin: CLIENT_ORIGINS, methods: ["GET", "POST"] },
+  connectionStateRecovery: { maxDisconnectionDuration: DISCONNECT_GRACE_MS, skipMiddlewares: true },
 });
 
 type RoomPlayer = PlayerSummary & { socketId: string };
@@ -56,6 +58,7 @@ type Room = {
 const rooms = new Map<string, Room>();
 const socketRooms = new Map<string, string>();
 const phaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function clearPhaseTimer(room: Room): void {
   const timer = phaseTimers.get(room.code);
@@ -237,6 +240,9 @@ function resolveDay(room: Room, timedOut = false): void {
 }
 
 function leaveCurrentRoom(socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>): void {
+  const pendingDisconnect = disconnectTimers.get(socket.id);
+  if (pendingDisconnect) clearTimeout(pendingDisconnect);
+  disconnectTimers.delete(socket.id);
   const roomCode = socketRooms.get(socket.id);
   if (!roomCode) return;
   const room = rooms.get(roomCode);
@@ -269,6 +275,27 @@ function leaveCurrentRoom(socket: Socket<ClientToServerEvents, ServerToClientEve
 }
 
 io.on("connection", (socket) => {
+  const pendingDisconnect = disconnectTimers.get(socket.id);
+  if (pendingDisconnect) clearTimeout(pendingDisconnect);
+  disconnectTimers.delete(socket.id);
+
+  if (socket.recovered) {
+    const recoveredRoomCode = socketRooms.get(socket.id);
+    const recoveredRoom = recoveredRoomCode ? rooms.get(recoveredRoomCode) : undefined;
+    if (recoveredRoom) {
+      socket.emit("room:updated", snapshot(recoveredRoom));
+      const role = recoveredRoom.roles.get(socket.id);
+      if (role) {
+        socket.emit("game:role", role);
+        if (role === "mafia") {
+          socket.emit("game:mafia-team", recoveredRoom.players
+            .filter((player) => recoveredRoom.roles.get(player.socketId) === "mafia")
+            .map((player) => player.id));
+        }
+      }
+    }
+  }
+
   socket.on("room:create", ({ playerName }, callback) => {
     const name = playerName.trim().slice(0, 20);
     if (!name) return callback({ ok: false, error: "Введите имя игрока." });
@@ -438,7 +465,14 @@ io.on("connection", (socket) => {
   });
 
   socket.on("room:leave", () => leaveCurrentRoom(socket));
-  socket.on("disconnect", () => leaveCurrentRoom(socket));
+  socket.on("disconnect", () => {
+    if (!socketRooms.has(socket.id)) return;
+    const timer = setTimeout(() => {
+      disconnectTimers.delete(socket.id);
+      leaveCurrentRoom(socket);
+    }, DISCONNECT_GRACE_MS);
+    disconnectTimers.set(socket.id, timer);
+  });
 });
 
 httpServer.listen(PORT, () => {
