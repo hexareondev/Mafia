@@ -6,6 +6,7 @@ import type { ClientToServerEvents, ServerToClientEvents, RoomSnapshot, Role, Pl
 const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? "http://localhost:3001";
 type MafiaSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 const SESSION_STORAGE_KEY = "mafia.playerSession";
+const inviteCodeFromUrl = new URLSearchParams(window.location.search).get("room")?.trim().toUpperCase() ?? "";
 
 function readStoredSession(): PlayerSession | null {
   try {
@@ -37,7 +38,7 @@ export default function App() {
   const [socket, setSocket] = useState<MafiaSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [name, setName] = useState("");
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(inviteCodeFromUrl);
   const [room, setRoom] = useState<RoomSnapshot | null>(null);
   const [session, setSession] = useState<PlayerSession | null>(() => readStoredSession());
   const activeRoomRef = useRef<RoomSnapshot | null>(null);
@@ -60,7 +61,7 @@ export default function App() {
       setConnected(true);
       if (!connection.recovered) {
         const savedSession = readStoredSession();
-        if (savedSession) {
+        if (savedSession && !inviteCodeFromUrl) {
           connection.emit("room:rejoin", savedSession, (result) => {
             if (result.ok) {
               const nextSession = result.session ?? savedSession;
@@ -123,7 +124,7 @@ export default function App() {
     if (!socket) return;
     setError("");
     socket.emit("room:join", { code, playerName: name }, (result) => {
-      if (result.ok) { setRoom(result.room); setRole(null); if (result.session) { setSession(result.session); localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(result.session)); } }
+      if (result.ok) { setRoom(result.room); setRole(null); window.history.replaceState({}, "", window.location.pathname); if (result.session) { setSession(result.session); localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(result.session)); } }
       else setError(result.error);
     });
   };
@@ -211,7 +212,7 @@ export default function App() {
             <div className="separator"><span /> ИЛИ ПРИСОЕДИНИТЬСЯ <span /></div>
             <div className="join-row">
               <input aria-label="Код комнаты" maxLength={5} placeholder="КОД" value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} />
-              <button className="secondary-button" disabled={!connected || !name.trim() || code.trim().length !== 5} onClick={joinRoom}>Войти <DoorOpen size={16} /></button>
+              <button className="secondary-button" disabled={!connected || !name.trim() || code.trim().length !== 5} onClick={joinRoom}>{inviteCodeFromUrl ? "Войти в комнату" : "Войти"} <DoorOpen size={16} /></button>
             </div>
             {error && <p className="error-message">{error}</p>}
           </div>
