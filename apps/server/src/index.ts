@@ -2,7 +2,7 @@ import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from "node:crypto";
-import { deleteStoredRoom, initializeRoomStorage, saveStoredRoom } from "./storage.js";
+import { deleteStoredRoom, getRoomStorageMode, initializeRoomStorage, saveStoredRoom } from "./storage.js";
 import { createRoleDeck, getUniqueVoteLeader, getWinner } from "./game.js";
 import { Server, type Socket } from "socket.io";
 import {
@@ -29,7 +29,7 @@ const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS ?? process.env.CLIENT_ORIGIN 
   .filter(Boolean);
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGINS }));
-app.get("/health", (_req, res) => res.json({ status: "ok", service: "mafia-server" }));
+app.get("/health", (_req, res) => res.json({ status: "ok", service: "mafia-server", storage: getRoomStorageMode() }));
 
 const httpServer = createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(httpServer, {
