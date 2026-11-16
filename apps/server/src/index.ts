@@ -202,10 +202,11 @@ function resolveDay(room: Room, timedOut = false): void {
   const leadingTargetId = getUniqueVoteLeader(room.dayVotes.values());
   if (leadingTargetId !== null) {
     const targetId = leadingTargetId;
+    const voteCount = [...room.dayVotes.values()].filter((id) => id === targetId).length;
     const eliminated = room.players.find((player) => player.id === targetId && player.alive);
     if (eliminated) {
       eliminated.alive = false;
-      room.lastDayMessage = `Игрок «${eliminated.name}» исключён голосованием (${highest} голосов).`;
+      room.lastDayMessage = `Игрок «${eliminated.name}» исключён голосованием (${voteCount} голосов).`;
     } else {
       room.lastDayMessage = "Голосование не привело к исключению игрока.";
     }
