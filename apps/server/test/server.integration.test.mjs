@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer } from "node:net";
+import { fileURLToPath } from "node:url";
 import { io as createClient } from "socket.io-client";
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -55,7 +56,8 @@ async function connectClient(url) {
 test("four clients can complete a full server-authoritative game", async (t) => {
   const port = await getFreePort();
   const url = `http://127.0.0.1:${port}`;
-  const server = spawn(process.execPath, ["dist/index.js"], {
+  const serverEntry = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+  const server = spawn(process.execPath, [serverEntry], {
     env: {
       ...process.env,
       PORT: String(port),
@@ -131,6 +133,7 @@ test("four clients can complete a full server-authoritative game", async (t) => 
   const mafiaId = started.room.players[mafiaIndex].id;
   const townTargetId = started.room.players.find((player) => player.id !== mafiaId).id;
 
+  const investigationResult = waitForEvent(clients[detectiveIndex], "game:investigation-result");
   const dayStarted = waitForEvent(
     clients[0],
     "room:updated",
@@ -143,7 +146,10 @@ test("four clients can complete a full server-authoritative game", async (t) => 
   const detectiveAction = emitWithAck(clients[detectiveIndex], "game:night-action", { targetId: detectiveTargetId });
   const nightResults = await Promise.all([mafiaAction, doctorAction, detectiveAction]);
   assert.ok(nightResults.every((result) => result.ok));
+  const checkedPlayer = await investigationResult;
+  assert.equal(typeof checkedPlayer.isMafia, "boolean");
   const dayRoom = await dayStarted;
+  assert.match(dayRoom.lastNightMessage, /доктор спас/);
   assert.equal(dayRoom.phase, "day");
 
   const winnerUpdate = waitForEvent(
