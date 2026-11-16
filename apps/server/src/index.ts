@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { randomInt } from "node:crypto";
+import { createRoleDeck, getUniqueVoteLeader, getWinner } from "./game.js";
 import { Server, type Socket } from "socket.io";
 import {
   MIN_PLAYERS_TO_START,
@@ -120,27 +121,16 @@ function shuffle<T>(items: T[]): T[] {
   return result;
 }
 
-function createRoleDeck(playerCount: number): Role[] {
-  const mafiaCount = Math.max(1, Math.floor(playerCount / 5));
-  const roles: Role[] = [
-    ...Array.from({ length: mafiaCount }, () => "mafia" as const),
-    "doctor",
-    "detective",
-  ];
-  while (roles.length < playerCount) roles.push("citizen");
-  return shuffle(roles);
-}
-
 function countAlive(room: Room, role?: Role): number {
   return room.players.filter((player) => player.alive && (!role || room.roles.get(player.socketId) === role)).length;
 }
 
 function checkWinner(room: Room): GameWinner | null {
-  const mafia = countAlive(room, "mafia");
-  const town = countAlive(room) - mafia;
-  if (mafia === 0) return "town";
-  if (mafia >= town) return "mafia";
-  return null;
+  const aliveRoles = room.players
+    .filter((player) => player.alive)
+    .map((player) => room.roles.get(player.socketId))
+    .filter((role): role is Role => role !== undefined);
+  return getWinner(aliveRoles);
 }
 
 function finishIfWinner(room: Room): boolean {
@@ -209,12 +199,9 @@ function resolveDay(room: Room, timedOut = false): void {
   if (!timedOut && !livingPlayers.every((player) => room.dayVotes.has(player.socketId))) return;
   clearPhaseTimer(room);
 
-  const counts = new Map<string, number>();
-  for (const targetId of room.dayVotes.values()) counts.set(targetId, (counts.get(targetId) ?? 0) + 1);
-  const highest = counts.size ? Math.max(...counts.values()) : 0;
-  const leaders = [...counts.entries()].filter(([, votes]) => votes === highest);
-  if (leaders.length === 1 && highest > 0) {
-    const targetId = leaders[0]![0];
+  const leadingTargetId = getUniqueVoteLeader(room.dayVotes.values());
+  if (leadingTargetId !== null) {
+    const targetId = leadingTargetId;
     const eliminated = room.players.find((player) => player.id === targetId && player.alive);
     if (eliminated) {
       eliminated.alive = false;
@@ -223,7 +210,9 @@ function resolveDay(room: Room, timedOut = false): void {
       room.lastDayMessage = "Голосование не привело к исключению игрока.";
     }
   } else {
-    room.lastDayMessage = "Голоса разделились поровну. Никто не исключён.";
+    room.lastDayMessage = room.dayVotes.size === 0
+      ? "Никто не проголосовал. Никто не исключён."
+      : "Голоса разделились поровну. Никто не исключён.";
   }
 
   room.dayVotes.clear();
