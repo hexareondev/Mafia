@@ -18,6 +18,8 @@ import {
 } from "@mafia/shared";
 
 const PORT = Number(process.env.PORT ?? 3001);
+const NIGHT_DURATION_MS = Math.max(15, Number(process.env.NIGHT_DURATION_SECONDS ?? 60)) * 1000;
+const DAY_DURATION_MS = Math.max(30, Number(process.env.DAY_DURATION_SECONDS ?? 180)) * 1000;
 const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS ?? process.env.CLIENT_ORIGIN ?? "http://localhost:5173")
   .split(",")
   .map((origin) => origin.trim())
@@ -38,6 +40,7 @@ type Room = {
   createdAt: number;
   status: "lobby" | "playing" | "finished";
   phase: "night" | "day" | null;
+  phaseEndsAt: number | null;
   dayNumber: number;
   winner: GameWinner | null;
   lastNightMessage: string | null;
@@ -52,6 +55,25 @@ type Room = {
 
 const rooms = new Map<string, Room>();
 const socketRooms = new Map<string, string>();
+const phaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearPhaseTimer(room: Room): void {
+  const timer = phaseTimers.get(room.code);
+  if (timer) clearTimeout(timer);
+  phaseTimers.delete(room.code);
+}
+
+function schedulePhaseTimer(room: Room): void {
+  clearPhaseTimer(room);
+  if (room.status !== "playing" || !room.phase || room.phaseEndsAt === null) return;
+  const timer = setTimeout(() => {
+    phaseTimers.delete(room.code);
+    if (room.status !== "playing") return;
+    if (room.phase === "night") resolveNight(room, true);
+    else if (room.phase === "day") resolveDay(room, true);
+  }, Math.max(0, room.phaseEndsAt - Date.now()));
+  phaseTimers.set(room.code, timer);
+}
 
 function makeRoomCode(): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -73,6 +95,7 @@ function snapshot(room: Room): RoomSnapshot {
     hostId: room.players.find((player) => player.isHost)?.id ?? null,
     status: room.status,
     phase: room.phase,
+    phaseEndsAt: room.phaseEndsAt,
     dayNumber: room.dayNumber,
     winner: room.winner,
     lastNightMessage: room.lastNightMessage,
@@ -122,6 +145,8 @@ function finishIfWinner(room: Room): boolean {
   if (!winner) return false;
   room.status = "finished";
   room.phase = null;
+  room.phaseEndsAt = null;
+  clearPhaseTimer(room);
   room.winner = winner;
   emitRoom(room);
   return true;
@@ -136,8 +161,9 @@ function nightActionsComplete(room: Room): boolean {
     && (!detectiveAlive || room.detectiveActed);
 }
 
-function resolveNight(room: Room): void {
-  if (room.status !== "playing" || room.phase !== "night" || !nightActionsComplete(room)) return;
+function resolveNight(room: Room, timedOut = false): void {
+  if (room.status !== "playing" || room.phase !== "night" || (!timedOut && !nightActionsComplete(room))) return;
+  clearPhaseTimer(room);
 
   const voteCounts = new Map<string, number>();
   for (const targetId of room.mafiaVotes.values()) {
@@ -168,14 +194,17 @@ function resolveNight(room: Room): void {
 
   if (!finishIfWinner(room)) {
     room.phase = "day";
+    room.phaseEndsAt = Date.now() + DAY_DURATION_MS;
+    schedulePhaseTimer(room);
   }
   emitRoom(room);
 }
 
-function resolveDay(room: Room): void {
+function resolveDay(room: Room, timedOut = false): void {
   if (room.status !== "playing" || room.phase !== "day") return;
   const livingPlayers = room.players.filter((player) => player.alive);
-  if (!livingPlayers.every((player) => room.dayVotes.has(player.socketId))) return;
+  if (!timedOut && !livingPlayers.every((player) => room.dayVotes.has(player.socketId))) return;
+  clearPhaseTimer(room);
 
   const counts = new Map<string, number>();
   for (const targetId of room.dayVotes.values()) counts.set(targetId, (counts.get(targetId) ?? 0) + 1);
@@ -197,10 +226,12 @@ function resolveDay(room: Room): void {
   room.dayVotes.clear();
   if (!finishIfWinner(room)) {
     room.phase = "night";
+    room.phaseEndsAt = Date.now() + NIGHT_DURATION_MS;
     room.dayNumber += 1;
     room.mafiaVotes.clear();
     room.doctorTarget = null;
     room.detectiveActed = false;
+    schedulePhaseTimer(room);
   }
   emitRoom(room);
 }
@@ -219,6 +250,7 @@ function leaveCurrentRoom(socket: Socket<ClientToServerEvents, ServerToClientEve
   room.dayVotes.delete(socket.id);
   for (const [voterId, targetId] of room.dayVotes) if (targetId === socket.id) room.dayVotes.delete(voterId);
   if (room.players.length === 0) {
+    clearPhaseTimer(room);
     rooms.delete(roomCode);
     return;
   }
@@ -245,7 +277,7 @@ io.on("connection", (socket) => {
     const code = makeRoomCode();
     const player: RoomPlayer = { id: socket.id, socketId: socket.id, name, isHost: true, ready: false, alive: true };
     const room: Room = {
-      code, players: [player], createdAt: Date.now(), status: "lobby", phase: null, dayNumber: 0,
+      code, players: [player], createdAt: Date.now(), status: "lobby", phase: null, phaseEndsAt: null, dayNumber: 0,
       winner: null, lastNightMessage: null, lastDayMessage: null, chatMessages: [], dayVotes: new Map(), roles: new Map(), mafiaVotes: new Map(),
       doctorTarget: null, detectiveActed: false,
     };
@@ -315,6 +347,7 @@ io.on("connection", (socket) => {
     });
     room.status = "playing";
     room.phase = "night";
+    room.phaseEndsAt = Date.now() + NIGHT_DURATION_MS;
     room.dayNumber = 1;
     room.winner = null;
     room.lastNightMessage = null;
@@ -324,6 +357,7 @@ io.on("connection", (socket) => {
     room.mafiaVotes.clear();
     room.doctorTarget = null;
     room.detectiveActed = false;
+    schedulePhaseTimer(room);
     emitRoom(room);
     callback({ ok: true, room: snapshot(room) });
   });
