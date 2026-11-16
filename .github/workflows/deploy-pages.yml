@@ -44,6 +44,9 @@ jobs:
       - name: Build server
         run: npm run build -w @mafia/server
 
+      - name: Run server tests
+        run: npm run test -w @mafia/server
+
       - name: Build web app
         run: npm run build -w @mafia/web
         env:
