@@ -29,13 +29,16 @@ export type RoomSnapshot = {
   chatMessages: ChatMessage[];
 };
 
+export type PlayerSession = { roomCode: string; playerId: string; token: string };
+
 export type ActionResult =
-  | { ok: true; room: RoomSnapshot }
+  | { ok: true; room: RoomSnapshot; session?: PlayerSession }
   | { ok: false; error: string };
 
 export interface ClientToServerEvents {
   "room:create": (payload: { playerName: string }, callback: (result: ActionResult) => void) => void;
   "room:join": (payload: { code: string; playerName: string }, callback: (result: ActionResult) => void) => void;
+  "room:rejoin": (payload: PlayerSession, callback: (result: ActionResult) => void) => void;
   "room:leave": () => void;
   "room:ready": (payload: { ready: boolean }, callback: (result: ActionResult) => void) => void;
   "game:start": (callback: (result: ActionResult) => void) => void;
