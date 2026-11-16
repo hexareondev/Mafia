@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import { createServer } from "node:http";
 import { randomInt } from "node:crypto";
+import { deleteStoredRoom, initializeRoomStorage, saveStoredRoom } from "./storage.js";
 import { createRoleDeck, getUniqueVoteLeader, getWinner } from "./game.js";
 import { Server, type Socket } from "socket.io";
 import {
@@ -110,6 +111,9 @@ function snapshot(room: Room): RoomSnapshot {
 
 function emitRoom(room: Room): void {
   io.to(room.code).emit("room:updated", snapshot(room));
+  void saveStoredRoom(room).catch((error: unknown) => {
+    console.error(`Failed to persist room ${room.code}:`, error);
+  });
 }
 
 function shuffle<T>(items: T[]): T[] {
@@ -248,6 +252,7 @@ function leaveCurrentRoom(socket: Socket<ClientToServerEvents, ServerToClientEve
   if (room.players.length === 0) {
     clearPhaseTimer(room);
     rooms.delete(roomCode);
+    void deleteStoredRoom(roomCode).catch((error: unknown) => console.error("Failed to delete stored room:", error));
     return;
   }
   if (!room.players.some((player) => player.isHost)) {
@@ -465,6 +470,21 @@ io.on("connection", (socket) => {
   });
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`Mafia server listening on port ${PORT}`);
-});
+async function startServer(): Promise<void> {
+  try {
+    const restoredRooms = await initializeRoomStorage<Room>();
+    for (const room of restoredRooms) {
+      rooms.set(room.code, room);
+      if (room.status === "playing") schedulePhaseTimer(room);
+    }
+    if (restoredRooms.length > 0) console.log(`Restored ${restoredRooms.length} room(s) from Redis.`);
+  } catch (error) {
+    console.error("Redis initialization failed; starting with in-memory rooms:", error);
+  }
+
+  httpServer.listen(PORT, () => {
+    console.log(`Mafia server listening on port ${PORT}`);
+  });
+}
+
+void startServer();
