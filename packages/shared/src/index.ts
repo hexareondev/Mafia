@@ -21,6 +21,7 @@ export type RoomSnapshot = {
   hostId: string | null;
   status: "lobby" | "playing" | "finished";
   phase: GamePhase | null;
+  phaseEndsAt: number | null;
   dayNumber: number;
   winner: GameWinner | null;
   lastNightMessage: string | null;
