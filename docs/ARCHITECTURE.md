@@ -28,7 +28,7 @@
 Workflow `.github/workflows/deploy-pages.yml` собирает клиент и публикует его на GitHub Pages при каждом push в `main`.
 
 1. В настройках репозитория открой **Settings → Pages** и выбери **Source: GitHub Actions**.
-2. После создания сервиса на Render добавь переменную репозитория `VITE_SERVER_URL` со значением публичного URL сервера.
+2. После создания сервиса на Render добавь переменную репозитория `VITE_SERVER_URL` со значением публичного URL сервера. Для постоянного хранения создай Redis/Key Value instance у провайдера, затем добавь его connection URL в переменную окружения сервиса Render `REDIS_URL` (Blueprint запросит значение при настройке).
 3. Запусти workflow **Deploy web to GitHub Pages** вручную или отправь новый commit в `main`.
 
 Ожидаемый адрес сайта: `https://hexareondev.github.io/Mafia/`.
