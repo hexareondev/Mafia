@@ -8,6 +8,7 @@ type PersistableRoom = {
   dayVotes: Map<string, string>;
   roles: Map<string, string>;
   mafiaVotes: Map<string, string>;
+  players: Array<{ socketId: string }>;
 };
 
 let client: ReturnType<typeof createClient> | null = null;
@@ -37,12 +38,14 @@ export async function initializeRoomStorage<T extends PersistableRoom>(): Promis
         roles: [string, string][];
         mafiaVotes: [string, string][];
       };
-      restored.push({
+      const room = {
         ...parsed,
         dayVotes: new Map(parsed.dayVotes),
         roles: new Map(parsed.roles),
         mafiaVotes: new Map(parsed.mafiaVotes),
-      } as T);
+      } as T;
+      for (const player of room.players) player.socketId = "";
+      restored.push(room);
     } catch (error) {
       console.error(`Skipping invalid saved room ${key}:`, error);
     }
