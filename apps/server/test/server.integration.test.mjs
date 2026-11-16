@@ -98,6 +98,8 @@ test("four clients can complete a full server-authoritative game", async (t) => 
 
   const created = await emitWithAck(clients[0], "room:create", { playerName: "Host" });
   assert.equal(created.ok, true);
+  assert.ok(created.session?.token);
+  const sessions = [created.session];
   const roomCode = created.room.code;
 
   for (let index = 1; index < 4; index += 1) {
@@ -106,6 +108,8 @@ test("four clients can complete a full server-authoritative game", async (t) => 
       playerName: `Player ${index + 1}`,
     });
     assert.equal(joined.ok, true);
+    assert.ok(joined.session?.token);
+    sessions.push(joined.session);
   }
 
   for (const client of clients) {
@@ -121,6 +125,16 @@ test("four clients can complete a full server-authoritative game", async (t) => 
   assert.equal(roles.filter((role) => role === "mafia").length, 1);
   assert.equal(roles.filter((role) => role === "doctor").length, 1);
   assert.equal(roles.filter((role) => role === "detective").length, 1);
+
+  const oldHostSocket = clients[0];
+  oldHostSocket.disconnect();
+  const replacementHostSocket = await connectClient(url);
+  clients[0] = replacementHostSocket;
+  const restoredRolePromise = waitForEvent(replacementHostSocket, "game:role");
+  const rejoined = await emitWithAck(replacementHostSocket, "room:rejoin", sessions[0]);
+  assert.equal(rejoined.ok, true);
+  assert.equal(rejoined.room.players[0].id, created.room.players[0].id);
+  assert.equal(await restoredRolePromise, roles[0]);
 
   // Public room snapshots must never reveal any player's role.
   assert.equal("roles" in started.room, false);
