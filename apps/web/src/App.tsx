@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { ArrowLeft, Check, Copy, Crown, DoorOpen, MessageCircle, Moon, Send, Shield, Users } from "lucide-react";
 import type { ClientToServerEvents, ServerToClientEvents, RoomSnapshot, Role } from "@mafia/shared";
@@ -25,6 +25,7 @@ export default function App() {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [room, setRoom] = useState<RoomSnapshot | null>(null);
+  const activeRoomRef = useRef<RoomSnapshot | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [investigationResult, setInvestigationResult] = useState<{ targetId: string; targetName: string; isMafia: boolean } | null>(null);
   const [mafiaTeamIds, setMafiaTeamIds] = useState<string[]>([]);
@@ -35,8 +36,22 @@ export default function App() {
   const [clockNow, setClockNow] = useState(Date.now());
 
   useEffect(() => {
+    activeRoomRef.current = room;
+  }, [room]);
+
+  useEffect(() => {
     const connection: MafiaSocket = io(SERVER_URL, { autoConnect: true, reconnection: true });
-    connection.on("connect", () => setConnected(true));
+    connection.on("connect", () => {
+      setConnected(true);
+      if (!connection.recovered && activeRoomRef.current) {
+        setRoom(null);
+        activeRoomRef.current = null;
+        setRole(null);
+        setInvestigationResult(null);
+        setMafiaTeamIds([]);
+        setError("Соединение восстановлено, но игровую сессию вернуть не удалось. Подключитесь к комнате заново.");
+      }
+    });
     connection.on("disconnect", () => setConnected(false));
     connection.on("room:updated", (nextRoom) => {
       setRoom(nextRoom);
