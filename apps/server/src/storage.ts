@@ -8,7 +8,6 @@ type PersistableRoom = {
   dayVotes: Map<string, string>;
   roles: Map<string, string>;
   mafiaVotes: Map<string, string>;
-  [key: string]: unknown;
 };
 
 let client: ReturnType<typeof createClient> | null = null;
